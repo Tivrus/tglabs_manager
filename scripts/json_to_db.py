@@ -1,8 +1,8 @@
 import json
 import psycopg2
-from dotenv import load_dotenv
 from datetime import datetime
 from uuid import UUID
+from dotenv import load_dotenv
 import os
 
 load_dotenv()
@@ -26,30 +26,33 @@ def load_videos_and_snapshots(videos_data):
 
     for video in videos_data:
         cursor.execute("""
-            INSERT INTO videos (id, creator_id, video_created_at, views_count, likes_count, comments_count, reports_count, created_at, updated_at)
+            INSERT INTO videos (
+                id, creator_id, video_created_at, views_count, likes_count,
+                comments_count, reports_count, created_at, updated_at
+            )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
-            UUID(video["id"]),
-            UUID(video["creator_id"]),
+            str(UUID(video["id"])),
+            str(UUID(video["creator_id"])),
             datetime.fromisoformat(video["video_created_at"]),
             video["views_count"],
             video["likes_count"],
             video["comments_count"],
             video["reports_count"],
-            datetime.now(),
-            datetime.now()
+            datetime.fromisoformat(video["created_at"]),
+            datetime.fromisoformat(video["updated_at"])
         ))
 
         for snapshot in video["snapshots"]:
             cursor.execute("""
                 INSERT INTO video_snapshots (
-                    video_id, views_count, likes_count, comments_count, reports_count,
-                    delta_views_count, delta_likes_count, delta_comments_count, delta_reports_count,
-                    created_at, updated_at
+                    video_id, views_count, likes_count, comments_count,
+                    reports_count, delta_views_count, delta_likes_count,
+                    delta_comments_count, delta_reports_count, created_at, updated_at
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                UUID(video["id"]),
+                str(UUID(snapshot["video_id"])),
                 snapshot["views_count"],
                 snapshot["likes_count"],
                 snapshot["comments_count"],
@@ -59,7 +62,7 @@ def load_videos_and_snapshots(videos_data):
                 snapshot["delta_comments_count"],
                 snapshot["delta_reports_count"],
                 datetime.fromisoformat(snapshot["created_at"]),
-                datetime.now()
+                datetime.fromisoformat(snapshot["updated_at"])
             ))
 
     conn.commit()
@@ -67,6 +70,7 @@ def load_videos_and_snapshots(videos_data):
     conn.close()
 
 if __name__ == "__main__":
-    json_file_path = "data/videos.json"
-    videos_data = load_data_from_json(json_file_path)
+    json_file_path = "../data/videos.json"
+    json_data = load_data_from_json(json_file_path)
+    videos_data = json_data.get("videos", [])
     load_videos_and_snapshots(videos_data)
