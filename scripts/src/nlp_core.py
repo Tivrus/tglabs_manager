@@ -51,11 +51,16 @@ model = AutoModelForImageTextToText.from_pretrained(
 print("Модель успешно загружена")
 
 def extract_sql_from_response(response_text):
+    if not response_text or not isinstance(response_text, str):
+        return None
+    
+    # Удаляем префиксы перед SQL
     if "SQL-запрос:" in response_text:
         response_text = response_text.split("SQL-запрос:")[-1]
     if "SQL:" in response_text:
         response_text = response_text.split("SQL:")[-1]
     
+    # Паттерны для извлечения SQL из markdown блоков
     sql_patterns = [
         r"```sql\s*(.*?)\s*```",
         r"```\s*(SELECT.*?)\s*```",
@@ -65,20 +70,31 @@ def extract_sql_from_response(response_text):
     for pattern in sql_patterns:
         match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
         if match:
-            sql = match.group(1).strip()
-            if sql.upper().startswith(('SELECT', 'WITH')):
-                return sql
+            sql = match.group(1)
+            if sql:
+                sql = sql.strip()
+                if sql and sql.upper().startswith(('SELECT', 'WITH')):
+                    return sql
     
+    # Поиск SQL по ключевым словам
     sql_keywords = ["SELECT", "WITH"]
     for keyword in sql_keywords:
         idx = response_text.upper().find(keyword)
         if idx != -1:
             sql = response_text[idx:].strip()
-            if ";" in sql:
-                sql = sql[:sql.index(";") + 1]
-            else:
-                sql = sql.split('\n')[0].strip() + ";"
-            return sql
+            if sql:
+                # Извлекаем SQL до точки с запятой или до конца строки
+                if ";" in sql:
+                    sql = sql[:sql.index(";") + 1]
+                else:
+                    # Берем первую строку, если нет точки с запятой
+                    first_line = sql.split('\n')[0].strip()
+                    if first_line:
+                        sql = first_line + ";"
+                    else:
+                        continue
+                if sql.upper().startswith(('SELECT', 'WITH')):
+                    return sql
     
     return None
 
@@ -145,6 +161,9 @@ SQL: SELECT COUNT(DISTINCT video_id) FROM video_snapshots WHERE DATE(created_at)
 Вопрос: "Сколько видео у креатора с id aca1061a9d324ecf8c3fa2bb32d7be63 вышло с 1 ноября 2025 по 5 ноября 2025 включительно?"
 SQL: SELECT COUNT(*) FROM videos WHERE creator_id = 'aca1061a9d324ecf8c3fa2bb32d7be63' AND video_created_at >= '2025-11-01' AND video_created_at <= '2025-11-05 23:59:59';
 
+Вопрос: "Сколько видео у креатора с id aca1061a9d324ecf8c3fa2bb32d7be63 набрали больше 10000 просмотров по итоговой статистике?"
+SQL: SELECT COUNT(*) FROM videos WHERE creator_id = 'aca1061a9d324ecf8c3fa2bb32d7be63' AND views_count > 10000;
+
 Вопрос: {user_query}
 SQL:"""
 
@@ -153,14 +172,26 @@ SQL:"""
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
-            max_new_tokens=200,
-            do_sample=False,
+            max_new_tokens=100,  # Уменьшено с 200 до 100 - SQL запросы обычно короче
+            do_sample=False,  # Жадный поиск быстрее, чем сэмплирование
             pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id
+            eos_token_id=tokenizer.eos_token_id,
+            num_beams=1,  # Отключение beam search для ускорения (greedy decoding)
+            early_stopping=True,  # Остановка при достижении EOS токена
+            use_cache=True  # Использование кэша для ускорения
         )
 
     full_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    sql_query = extract_sql_from_response(full_response).strip()
+    sql_query = extract_sql_from_response(full_response)
+    
+    if sql_query is None:
+        raise ValueError(
+            f"Нейросеть не смогла сгенерировать валидный SQL-запрос.\n"
+            f"Ответ модели: {full_response}\n"
+            f"С таким промптом нейросеть не смогла вернуть валидные данные на этот вопрос"
+        )
+    
+    sql_query = sql_query.strip()
     if not sql_query.endswith(';'):
         sql_query += ';'
     
