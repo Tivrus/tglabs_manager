@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 *.log
 .env
+npl_model/
+!npl_model/.gitkeep

@@ -1,2 +1,9 @@
 psycopg2-binary
 python-dotenv
+pyTelegramBotAPI
+transformers
+torch
+accelerate
+sentencepiece
+protobuf
+modelscope
