@@ -41,6 +41,68 @@ def validate_sql_query(sql_query):
     
     return True, "OK"
 
+def is_complex_query(sql_query):
+    sql_upper = sql_query.upper()
+    
+    has_join = 'JOIN' in sql_upper
+    has_subquery = sql_upper.count('SELECT') > 1
+    has_group_by = 'GROUP BY' in sql_upper
+    has_multiple_conditions = sql_upper.count('AND') + sql_upper.count('OR') >= 2
+    has_aggregations = any(func in sql_upper for func in ['SUM(', 'COUNT(', 'AVG(', 'MAX(', 'MIN('])
+    
+    query_length = len(sql_query)
+    keyword_count = sum(1 for keyword in ['WHERE', 'JOIN', 'GROUP', 'HAVING', 'ORDER'] if keyword in sql_upper)
+    
+    complexity_score = sum([
+        has_join,
+        has_subquery,
+        has_group_by and has_aggregations,
+        has_multiple_conditions and has_aggregations,
+        query_length > 200,
+        keyword_count >= 3
+    ])
+    
+    return complexity_score >= 2
+
+def validate_sql_with_llm(user_query, sql_query):
+    validation_prompt = f"""Ты эксперт по SQL и анализу требований. Проверь, соответствует ли SQL-запрос исходному заданию.
+
+Исходное задание:
+{user_query}
+
+SQL-запрос для проверки:
+{sql_query}
+
+Схема базы данных:
+- Таблица videos: id (UUID), creator_id (UUID), video_created_at (TIMESTAMP), views_count, likes_count, comments_count, reports_count
+- Таблица video_snapshots: id (SERIAL), video_id (UUID), views_count, likes_count, comments_count, reports_count, delta_views_count, delta_likes_count, delta_comments_count, delta_reports_count, created_at (TIMESTAMP)
+
+Проверь:
+1. Правильно ли выбраны таблицы (videos или video_snapshots)?
+2. Корректно ли применены фильтры (WHERE условия)?
+3. Правильно ли используются агрегатные функции (SUM, COUNT и т.д.)?
+4. Корректно ли выполнены JOIN'ы, если они нужны?
+5. Соответствует ли результат запроса тому, что спрашивается в задании?
+
+Ответь ТОЛЬКО одним словом:
+- "VALID" - если SQL запрос полностью соответствует заданию
+- "REGENERATE" - если SQL запрос не соответствует заданию и требует перегенерации
+
+Ответ:"""
+    
+    try:
+        response = call_api(validation_prompt, max_tokens=50)
+        response_upper = response.strip().upper()
+        
+        if "VALID" in response_upper:
+            return True, "SQL запрос соответствует заданию"
+        elif "REGENERATE" in response_upper:
+            return False, "SQL запрос не соответствует заданию, требуется перегенерация"
+        else:
+            return True, "Ответ валидатора неоднозначен, считаем валидным"
+    except Exception as e:
+        return True, f"Ошибка валидации: {str(e)}, пропускаем проверку"
+
 def extract_sql_from_response(response_text, user_query=None):
     uuid_pattern = r'([a-f0-9]{32})'
     user_uuids = re.findall(uuid_pattern, user_query or "", re.IGNORECASE)
@@ -96,9 +158,7 @@ def call_api(prompt, max_tokens=300, retries=3):
                 timeout=(10, 60)
             )
             response.raise_for_status()
-            
             data = response.json()
-            
             if data.get("choices") and len(data["choices"]) > 0:
                 return data["choices"][0]["message"]["content"]
             else:
@@ -108,7 +168,6 @@ def call_api(prompt, max_tokens=300, retries=3):
             last_error = e
             if attempt < retries - 1:
                 wait_time = (attempt + 1) * 2
-                print(f"Таймаут запроса (попытка {attempt + 1}/{retries}). Повтор через {wait_time} сек...")
                 time.sleep(wait_time)
             else:
                 raise ValueError(f"Таймаут запроса после {retries} попыток: {str(e)}")
@@ -116,7 +175,6 @@ def call_api(prompt, max_tokens=300, retries=3):
             last_error = e
             if attempt < retries - 1:
                 wait_time = (attempt + 1) * 2
-                print(f"Ошибка запроса (попытка {attempt + 1}/{retries}): {str(e)}. Повтор через {wait_time} сек...")
                 time.sleep(wait_time)
             else:
                 raise ValueError(f"Ошибка запроса после {retries} попыток: {str(e)}")
@@ -126,146 +184,80 @@ def call_api(prompt, max_tokens=300, retries=3):
     if last_error:
         raise ValueError(f"Ошибка при обращении к API: {str(last_error)}")
 
-def formulate_task(user_query):
-    task_prompt = f"""
-Дана база данных с двумя таблицами:
+def generate_sql_from_task(user_query):
+    sql_prompt = f"""Дана база данных с двумя таблицами:
 
 Таблица videos:
 - id (UUID) - уникальный идентификатор видео
-- creator_id (UUID) - идентификатор креатора (владельца видео)
+- creator_id (UUID) - идентификатор креатора
 - video_created_at (TIMESTAMP) - дата и время публикации видео
 - views_count (INTEGER) - итоговое количество просмотров
+- likes_count (INTEGER) - итоговое количество лайков
+- comments_count (INTEGER) - итоговое количество комментариев
+- reports_count (INTEGER) - итоговое количество жалоб
 
 Таблица video_snapshots:
 - id (SERIAL) - идентификатор замера
-- video_id (UUID) - ссылка на видео (связь с videos.id через внешний ключ)
+- video_id (UUID) - ссылка на видео (связь с videos.id)
 - views_count (INTEGER) - текущее количество просмотров на момент замера
 - created_at (TIMESTAMP) - время замера (раз в час)
 - delta_views_count (INTEGER) - приращение просмотров с прошлого замера
-
-ВАЖНО о связях:
-- video_snapshots.video_id связан с videos.id (это ID видео, а не креатора!)
-- Чтобы найти видео конкретного креатора, нужно фильтровать по videos.creator_id
-- Если вопрос про креатора и нужны данные из video_snapshots, ОБЯЗАТЕЛЬНО нужен JOIN:
-  video_snapshots JOIN videos ON video_snapshots.video_id = videos.id
-  И фильтровать по videos.creator_id
-
-Задача: Проанализируй вопрос пользователя и сформулируй детальное техническое задание для генерации SQL-запроса.
-
-Вопрос пользователя:
-{user_query}
-
-Сформулируй детальное техническое задание, которое должно включать:
-1. Какую таблицу(ы) нужно использовать (videos или video_snapshots или обе)
-2. Если нужны данные по креатору из video_snapshots - ОБЯЗАТЕЛЬНО указать необходимость JOIN с videos
-3. Какие поля нужны для ответа (указать полное имя таблицы.поле)
-4. Какие условия фильтрации применять:
-   - Если фильтр по креатору: videos.creator_id = 'UUID'
-   - Если фильтр по дате/времени: указать поле (created_at или video_created_at) и интервал
-5. Какие агрегатные функции использовать (COUNT, SUM, AVG и т.д.) и над какими полями
-6. Особые требования (например, суммирование изменений между замерами)
-
-Ответ должен быть структурированным и конкретным, без SQL-кода, только описание задачи.
-ВСЕГДА указывай полные имена таблиц и полей (например, videos.creator_id, video_snapshots.delta_views_count).
-
-Техническое задание:
-"""
-    try:
-        task_description = call_api(task_prompt, max_tokens=400)
-        print(f"Техническое задание от первой нейросети:\n{task_description}")
-        print("-" * 80)
-        return task_description
-    except Exception as e:
-        print(f"Ошибка при формулировании задачи: {str(e)}")
-        raise ValueError(f"Ошибка при обращении к API: {str(e)}")
-
-def generate_sql_from_task(user_query, task_description):
-    sql_prompt = f"""
-Дана база данных с двумя таблицами:
-
-Таблица videos:
-- id (UUID) - уникальный идентификатор видео
-- creator_id (UUID) - идентификатор креатора (владельца видео)
-- video_created_at (TIMESTAMP) - дата и время публикации видео
-- views_count (INTEGER) - итоговое количество просмотров
-
-Таблица video_snapshots:
-- id (SERIAL) - идентификатор замера
-- video_id (UUID) - ссылка на видео (связь с videos.id через внешний ключ)
-- views_count (INTEGER) - текущее количество просмотров на момент замера
-- created_at (TIMESTAMP) - время замера (раз в час)
-- delta_views_count (INTEGER) - приращение просмотров с прошлого замера
-
-КРИТИЧЕСКИ ВАЖНО:
-- video_snapshots.video_id - это ID видео, НЕ креатора!
-- Если в техническом задании указан фильтр по креатору (creator_id) и используются данные из video_snapshots - ОБЯЗАТЕЛЬНО нужен JOIN:
-  FROM video_snapshots 
-  JOIN videos ON video_snapshots.video_id = videos.id
-  WHERE videos.creator_id = 'UUID_креатора'
-- Если в техническом задании указано "JOIN между таблицами" или "фильтр по креатору" - используй JOIN!
-- ВСЕГДА используй полные имена таблиц.поле (например, videos.creator_id, video_snapshots.delta_views_count)
 
 Правила:
 1. UUID пишется в кавычках: 'aca1061a9d324ecf8c3fa2bb32d7be63'.
 2. Даты указываются в формате 'YYYY-MM-DD HH:MM:SS'.
 3. Числа пишутся без пробелов: 10 000 → 10000.
-4. Строго следуй техническому заданию - если там указан JOIN, используй JOIN!
+4. Для анализа итоговой статистики (например, просмотров) используйте таблицу videos.
+5. Для анализа изменений за период (например, прироста просмотров) используйте таблицу video_snapshots.
+6. Не используйте JOIN, если вся необходимая информация содержится в одной таблице.
 
-Исходный вопрос пользователя:
+Инструкции:
+1. Внимательно прочитайте вопрос и определите:
+   - Требуемые данные (например, количество, сумма, среднее значение).
+   - Условия фильтрации (например, дата, временная последовательность, приращения).
+2. Ответ должен содержать только SQL-запрос.
+3. Никаких объяснений, комментариев или кода на других языках.
+
+Вопрос:
 {user_query}
-
-Техническое задание:
-{task_description}
-
-Задача: На основе технического задания создай SQL-запрос для PostgreSQL.
-ВНИМАТЕЛЬНО прочитай техническое задание и строго следуй ему:
-- Если указан JOIN - используй JOIN
-- Если указан фильтр по videos.creator_id - используй JOIN с videos и фильтруй по videos.creator_id
-- Используй полные имена таблиц.поле как указано в техническом задании
-
-Ответ должен содержать ТОЛЬКО SQL-запрос, без объяснений, комментариев или кода на других языках.
 
 SQL:
 """
     try:
         sql_response = call_api(sql_prompt, max_tokens=300)
-        print(f"Ответ второй нейросети: {sql_response}")
-        print("-" * 80)
         return sql_response
     except Exception as e:
-        print(f"Ошибка при генерации SQL: {str(e)}")
         raise ValueError(f"Ошибка при обращении к API: {str(e)}")
 
 def process_query(user_query):
-    print(f"\nВопрос: {user_query}")
-    print("-" * 80)
-    
     if not API_KEY:
         raise ValueError("API_TOKEN не установлен в переменных окружения")
     
     try:
-        print("Шаг 1: Формулирование технического задания...")
-        task_description = formulate_task(user_query)
+        max_regenerations = 2
+        regeneration_count = 0
         
-        print("Шаг 2: Генерация SQL на основе технического задания...")
-        sql_response = generate_sql_from_task(user_query, task_description)
-        
-        sql_query = extract_sql_from_response(sql_response, user_query)
-        if not sql_query:
-            print("ОШИБКА: Не удалось извлечь SQL из ответа нейросети")
-            print(f"Ответ нейросети: {sql_response}")
-            raise ValueError("Нейросеть не смогла сгенерировать валидный SQL-запрос.")
-        
-        sql_query = fix_numbers_in_sql(sql_query)
-        
-        is_valid, error_msg = validate_sql_query(sql_query)
-        if not is_valid:
-            print(f"ОШИБКА валидации SQL: {error_msg}")
-            print(f"SQL-запрос: {sql_query}")
-            raise ValueError(f"Синтаксическая ошибка в SQL: {error_msg}")
-        
-        print(f"Финальный SQL: {sql_query}")
-        return sql_query
+        while regeneration_count <= max_regenerations:
+            sql_response = generate_sql_from_task(user_query)
+            
+            sql_query = extract_sql_from_response(sql_response, user_query)
+            if not sql_query:
+                raise ValueError("Нейросеть не смогла сгенерировать валидный SQL-запрос.")
+            
+            sql_query = fix_numbers_in_sql(sql_query)
+            
+            is_valid, error_msg = validate_sql_query(sql_query)
+            if not is_valid:
+                raise ValueError(f"Синтаксическая ошибка в SQL: {error_msg}")
+            
+            if is_complex_query(sql_query):
+                is_sql_valid, _ = validate_sql_with_llm(user_query, sql_query)
+                
+                if not is_sql_valid and regeneration_count < max_regenerations:
+                    regeneration_count += 1
+                    continue
+            
+            return sql_query
         
     except requests.exceptions.RequestException as e:
         error_msg = str(e)
@@ -275,8 +267,6 @@ def process_query(user_query):
                 error_msg = f"Статус код {e.response.status_code}. Ответ API: {error_detail}"
             except (ValueError, KeyError, TypeError):
                 error_msg = f"Статус код {e.response.status_code}. Ответ API: {e.response.text}"
-        print(f"ОШИБКА при запросе к API: {error_msg}")
         raise ValueError(f"Ошибка при обращении к API: {error_msg}")
     except Exception as e:
-        print(f"ОШИБКА при обработке запроса: {str(e)}")
         raise

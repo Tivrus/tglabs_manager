@@ -39,17 +39,9 @@ def handle_message(message):
         bot.reply_to(message, "Пожалуйста, задайте вопрос.")
         return
     
-    # processing_msg = None
     try:
-        # processing_msg = bot.reply_to(message, "Обрабатываю запрос...")
         sql_query = process_query(user_query)
         result = execute_query(sql_query)
-        # if processing_msg:
-        #     try:
-        #         bot.delete_message(message.chat.id, processing_msg.message_id)
-        #     except Exception:
-        #         pass
-        
         bot.reply_to(message, str(result))
         
     except ValueError:
