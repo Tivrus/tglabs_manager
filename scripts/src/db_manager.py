@@ -30,7 +30,12 @@ def execute_query(sql_query):
         if result is None:
             return 0
         
-        return result[0] if isinstance(result, tuple) else result
+        value = result[0] if isinstance(result, tuple) else result
+        
+        if value is None:
+            return 0
+        
+        return value
         
     except psycopg2.Error as e:
         raise ValueError(f"Ошибка выполнения SQL-запроса: {str(e)}")
