@@ -52,26 +52,14 @@ def handle_message(message):
         
         bot.reply_to(message, str(result))
         
-    except ValueError as e:
-        print(e)
-        # if processing_msg:
-        #     try:
-        #         bot.delete_message(message.chat.id, processing_msg.message_id)
-        #     except Exception:
-        #         pass
+    except ValueError:
         bot.reply_to(
             message, 
             "Произошла ошибка при обработке запроса.\n"
             "Пожалуйста, попробуйте переформулировать вопрос или обратитесь к администратору."
         )
         
-    except Exception as e:
-        print(e)
-        # if processing_msg:
-        #     try:
-        #         bot.delete_message(message.chat.id, processing_msg.message_id)
-        #     except Exception:
-        #         pass
+    except Exception:
         bot.reply_to(
             message,
             "Произошла внутренняя ошибка.\n"

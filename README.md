@@ -5,14 +5,14 @@
     - Обрабатывает сообщения от пользователей и координирует работу всех модулей.
 
 2. **Модуль генерации SQL**
-    - Использует локальную модель ИИ для преобразования вашего текстового запроса в SQL-запрос.
+    - Использует PublicAI API для преобразования вашего текстового запроса в SQL-запрос.
 
 3. **Модуль работы с базой данных**
     - Подключается к PostgreSQL, выполняет SQL-запросы и возвращает результаты.
 
 
 ### Подход к преобразованию текста в SQL
-Проект использует **локально развернутую LLM модель** (Qwen2.5-VL-3B-Instruct) для генерации SQL-запросов из естественного языка.
+Проект использует **PublicAI API** для генерации SQL-запросов из естественного языка. API предоставляет доступ к различным LLM моделям (по умолчанию используется `swiss-ai/apertus-8b-instruct`) без необходимости локальной установки и развертывания моделей.
 
 
 ### Описание схемы данных в промпте
@@ -54,14 +54,9 @@
 ### Требования
 - Python 3.12+
 - PostgreSQL 12+
-- Локально развернутая модель Qwen2.5-VL-3B-Instruct (В случае её отстутствия она установится автоматически)
+- API ключ от PublicAI (получить можно на https://publicai.co)
 
-
-#### Шаг 1: Загрузка модели
-Модель Qwen2.5-VL-3B-Instruct должна быть размещена в папке `npl_model/` в корне проекта.
-Если модель отсутствует, она будет автоматически загружена при первом запуске (требуется интернет-соединение, установка может занять время).
-
-#### Шаг 2: Настройка переменных окружения
+#### Шаг 1: Настройка переменных окружения
 Создайте файл `.env` в корне проекта:
 
 ```env
@@ -71,13 +66,21 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 # PostgreSQL DB Configuration
 DB_NAME=your_database_name
 DB_USER=postgres
-DB_PASSWORD= `your_password` 
+DB_PASSWORD= your_password
 DB_HOST=localhost
 DB_PORT=5432
+
+# PublicAI API Configuration
+API_TOKEN=your_publicai_api_key_here
+PUBLICAI_MODEL_NAME=swiss-ai/apertus-8b-instruct
 ```
 
+#### Шаг 2: Установка зависимостей
+```bash
+pip install -r requirements.txt
+```
 
-#### Шаг 8: Запуск бота
+#### Шаг 3: Запуск бота
 ```bash
 cd scripts/src
 python bot.py
@@ -87,11 +90,11 @@ python bot.py
 
 ### Технологии
 
-- **Python 3.8+** - основной язык программирования
+- **Python 3.12+** - основной язык программирования
 - **PostgreSQL** - база данных
 - **pyTelegramBotAPI** - библиотека для работы с Telegram Bot API
-- **transformers** - библиотека для работы с LLM моделями
-- **PyTorch** - фреймворк для машинного обучения
+- **PublicAI API** - облачный API для работы с LLM моделями
+- **requests** - библиотека для HTTP-запросов к API
 - **psycopg2** - драйвер PostgreSQL для Python
 
 ### Безопасность
@@ -109,14 +112,14 @@ python bot.py
     - Handles user messages and coordinates the work of all modules.
 
 2. **SQL Generation Module**
-    - Uses a local AI model to convert your text query into an SQL query.
+    - Uses PublicAI API to convert your text query into an SQL query.
 
 3. **Database Module**
     - Connects to PostgreSQL, executes SQL queries, and returns results.
 
 
 ### Approach to Converting Text to SQL
-The project uses a **locally deployed LLM model** (Qwen2.5-VL-3B-Instruct) to generate SQL queries from natural language.
+The project uses **PublicAI API** to generate SQL queries from natural language. The API provides access to various LLM models (default: `swiss-ai/apertus-8b-instruct`) without the need for local installation and deployment of models.
 
 
 ### Data Schema Description in Prompt
@@ -158,14 +161,9 @@ After generating the response using the model, the SQL query is extracted using 
 ### Requirements
 - Python 3.12+
 - PostgreSQL 12+
-- Locally deployed Qwen2.5-VL-3B-Instruct model (If absent, it will install automatically)
+- PublicAI API key (get one at https://publicai.co)
 
-
-#### Step 1: Downloading the Model
-The Qwen2.5-VL-3B-Instruct model should be placed in the `npl_model/` folder in the root directory of the project.
-If the model is missing, it will be automatically downloaded during the first run (requires internet connection, installation may take time).
-
-#### Step 2: Setting Up Environment Variables
+#### Step 1: Setting Up Environment Variables
 Create a `.env` file in the root directory of the project:
 
 ```env
@@ -175,13 +173,21 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 # PostgreSQL DB Configuration
 DB_NAME=your_database_name
 DB_USER=postgres
-DB_PASSWORD= `your_password` 
+DB_PASSWORD=your_password
 DB_HOST=localhost
 DB_PORT=5432
+
+# PublicAI API Configuration
+API_TOKEN=your_publicai_api_key_here
+PUBLICAI_MODEL_NAME=swiss-ai/apertus-8b-instruct
 ```
 
+#### Step 2: Installing Dependencies
+```bash
+pip install -r requirements.txt
+```
 
-#### Step 8: Running the Bot
+#### Step 3: Running the Bot
 ```bash
 cd scripts/src
 python bot.py
@@ -191,11 +197,11 @@ The bot will be launched and ready to process requests.
 
 ### Technologies
 
-- **Python 3.8+** - primary programming language
+- **Python 3.12+** - primary programming language
 - **PostgreSQL** - database
 - **pyTelegramBotAPI** - library for working with Telegram Bot API
-- **transformers** - library for working with LLM models
-- **PyTorch** - machine learning framework
+- **PublicAI API** - cloud API for working with LLM models
+- **requests** - library for HTTP requests to API
 - **psycopg2** - PostgreSQL driver for Python
 
 ### Security
